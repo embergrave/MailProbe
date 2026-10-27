@@ -5,3 +5,8 @@
 *.bundle
 __pycache__/
 *.py[cod]
+
+# Only these public placeholder samples are tracked.
+!/sample_emails/basic.eml
+!/sample_emails/auto-generated.eml
+!/sample_emails/multipart.eml

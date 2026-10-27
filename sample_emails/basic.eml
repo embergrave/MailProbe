@@ -1,0 +1,9 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: MailProbe basic email test
+Date: Tue, 27 Oct 2026 16:35:49 +0000
+MIME-Version: 1.0
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+
+Hello, this is a basic test email.

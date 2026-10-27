@@ -1,0 +1,2 @@
+# Preserve raw MIME CRLF bytes in Git and on every checkout.
+sample_emails/*.eml -text

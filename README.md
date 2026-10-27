@@ -20,4 +20,6 @@ python mailprobe.py
 
 Your personal `config.ini` stays local and must not be committed. `config.example.ini` is the shared format/template.
 
+Samples: `sample_emails/basic.eml` (plain text), `sample_emails/auto-generated.eml`, and `sample_emails/multipart.eml` (plain text + HTML).
+
 Licensed under the [MIT License](LICENSE).

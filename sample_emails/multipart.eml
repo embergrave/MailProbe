@@ -1,0 +1,21 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: MailProbe multipart email test
+Date: Tue, 27 Oct 2026 16:35:49 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="mailprobe-alternative"
+Content-Transfer-Encoding: 7bit
+
+--mailprobe-alternative
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+
+Hello, this is a test email.
+
+--mailprobe-alternative
+Content-Type: text/html; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+
+<html><body><p>Hello, this is a test email.</p></body></html>
+
+--mailprobe-alternative--
