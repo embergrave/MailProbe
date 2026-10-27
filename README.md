@@ -1,0 +1,23 @@
+# MailProbe
+
+Send existing raw MIME/`.eml` files through SMTP using a small desktop window or command-line interface.
+
+Requires **Python 3 with Tkinter/ttk**. MailProbe uses only the Python standard library.
+
+For a new setup, copy `config.example.ini` to `config.ini` in the folder where you launch MailProbe. Replace the dummy SMTP username/password and adjust the endpoint, port, and optional message defaults. Keep your existing `config.ini` if you already have one.
+
+From the MailProbe folder, launch the desktop interface:
+
+```powershell
+python mailprobe_gui.py
+```
+
+Or use the CLI:
+
+```powershell
+python mailprobe.py
+```
+
+Your personal `config.ini` stays local and must not be committed. `config.example.ini` is the shared format/template.
+
+Licensed under the [MIT License](LICENSE).

@@ -1,0 +1,7 @@
+/config.ini
+/SRD.txt
+*.eml
+*.log
+*.bundle
+__pycache__/
+*.py[cod]
