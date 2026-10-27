@@ -12,9 +12,9 @@ import mailprobe as core
 
 
 class ConfigField(ttk.Frame):
-    """A configured value with a temporary override; nothing is written back."""
+    """A default value with a temporary override; nothing is written back."""
 
-    def __init__(self, parent, label, configured, secret=False):
+    def __init__(self, parent, label, configured, secret=False, default_label="Use config"):
         super().__init__(parent)
         self.configured = str(configured)
         self.value = tk.StringVar(value=self.configured)
@@ -23,7 +23,7 @@ class ConfigField(ttk.Frame):
         ttk.Label(self, text=label, width=18).grid(row=0, column=0, sticky="w")
         self.entry = ttk.Entry(self, textvariable=self.value, show="\u2022" if secret else "")
         self.entry.grid(row=0, column=1, sticky="ew", padx=(0, 12))
-        self.check = ttk.Checkbutton(self, text="Use config", variable=self.use_config, command=self.toggle)
+        self.check = ttk.Checkbutton(self, text=default_label, variable=self.use_config, command=self.toggle)
         self.check.grid(row=0, column=2, sticky="w")
         self.toggle()
 
@@ -84,16 +84,17 @@ class MailProbeApp:
         self.fields["file"].grid(row=0, column=0, sticky="ew", pady=4)
         self.browse = ttk.Button(message, text="Browse\u2026", command=self.browse_file)
         self.browse.grid(row=0, column=1, padx=(12, 0))
-        self.fields["sender"] = ConfigField(message, "Envelope sender", defaults.get("default_envelope_sender", ""))
+        self.fields["sender"] = ConfigField(message, "From", "", default_label="Use MIME")
         self.fields["sender"].grid(row=1, column=0, columnspan=2, sticky="ew", pady=4)
+        self.fields["file"].value.trace_add("write", self.clear_mime_from)
         recipient_row = ttk.Frame(message)
         recipient_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         recipient_row.columnconfigure(1, weight=1)
-        ttk.Label(recipient_row, text="Recipients", width=18).grid(row=0, column=0, sticky="w")
+        ttk.Label(recipient_row, text="To", width=18).grid(row=0, column=0, sticky="w")
         self.recipients = tk.StringVar()  # Always blank, even if a config has recipient keys.
         self.recipient_entry = ttk.Entry(recipient_row, textvariable=self.recipients)
         self.recipient_entry.grid(row=0, column=1, sticky="ew")
-        ttk.Label(message, text="Comma-separated recipients, entered for this send. Edit MIME files externally.").grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(message, text="Use MIME reads From on review; uncheck to override. To is required (comma-separated).").grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         self.settings_open = False
         # Enlarge only the disclosure artwork, keeping the button's label font.
@@ -138,7 +139,7 @@ class MailProbeApp:
         log_frame.grid(row=6, column=0, sticky="nsew")
         self.log = scrolledtext.ScrolledText(log_frame, height=7, state="disabled", wrap="word", font=("Consolas", 9))
         self.log.pack(fill="both", expand=True)
-        self.status = tk.StringVar(value="Ready. Recipients and final confirmation are required.")
+        self.status = tk.StringVar(value="Ready. To and final confirmation are required.")
         ttk.Label(body, textvariable=self.status).grid(row=7, column=0, sticky="w", pady=(10, 0))
         self.progress = ttk.Progressbar(body, mode="indeterminate")
         self.progress.grid(row=8, column=0, sticky="ew", pady=(6, 0))
@@ -206,6 +207,12 @@ class MailProbeApp:
             field.toggle()
             field.value.set(filename)
 
+    def clear_mime_from(self, *_):
+        field = self.fields["sender"]
+        field.configured = ""
+        if field.use_config.get():
+            field.value.set("")
+
     def toggle_debug(self):
         self.handler.setLevel(logging.DEBUG if self.debug.get() else logging.INFO)
 
@@ -228,19 +235,22 @@ class MailProbeApp:
             return
         values = {key: field.value.get() for key, field in self.fields.items()}
         entered = self.recipients.get()
+        use_mime_from = self.fields["sender"].use_config.get()
         self.set_busy(True)
         self.status.set("Checking settings and MIME structure\u2026")
-        threading.Thread(target=self.prepare, args=(values, entered), daemon=True).start()
+        threading.Thread(target=self.prepare, args=(values, entered, use_mime_from), daemon=True).start()
 
-    def prepare(self, values, entered):
+    def prepare(self, values, entered, use_mime_from):
         try:
             smtp = core.validate_smtp(*(values[key] for key in ("host", "port", "username", "password")))
-            sender = core.envelope_address(values["sender"].strip())
-            recipients = core.envelope_recipients(entered)
             if not values["file"].strip():
                 raise core.MailProbeError("A message file is required.")
             path = Path(values["file"].strip()).expanduser().resolve()
             raw = core.load_message(path)
+            sender, recipients, raw = core.prepare_gui_message(
+                raw, entered, None if use_mime_from else values["sender"])
+            if use_mime_from:
+                self.events.put(("mime_from", sender))
             self.events.put(("ready", (smtp, sender, recipients, path, raw)))
         except Exception as error:
             self.events.put(("failed", core.safe_error(error)))
@@ -248,8 +258,10 @@ class MailProbeApp:
     def confirm(self, payload):
         smtp, sender, recipients, path, raw = payload
         review = (f"SMTP: {ascii(smtp[0])}:{smtp[1]} (verified STARTTLS required)\n"
-                  f"File: {ascii(str(path))}\nEnvelope sender: {sender}\n"
-                  f"Recipients: {', '.join(recipients)}\n\n"
+                  f"File: {ascii(str(path))}\nFrom: {sender}\n"
+                  f"To: {', '.join(recipients)}\n\n"
+                  "These addresses are used for the SMTP envelope and outgoing headers.\n"
+                  "The source file is unchanged.\n"
                   "MIME checks are basic. SES may rewrite headers.\nSend this message once?")
         if not messagebox.askyesno("Confirm send", review, parent=self.root, default=messagebox.NO):
             core.LOG.info("Cancelled; no message sent.")
@@ -276,6 +288,9 @@ class MailProbeApp:
                     self.log.insert("end", value + "\n")
                     self.log.see("end")
                     self.log.configure(state="disabled")
+                elif kind == "mime_from":
+                    self.fields["sender"].configured = value
+                    self.fields["sender"].value.set(value)
                 elif kind == "ready":
                     self.confirm(value)
                 elif kind == "failed":

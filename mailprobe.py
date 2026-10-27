@@ -5,7 +5,7 @@ import configparser
 from contextlib import closing
 from email import policy
 from email.errors import MessageError
-from email.parser import BytesParser
+from email.parser import BytesHeaderParser, BytesParser
 from email.utils import parseaddr
 import logging
 from pathlib import Path
@@ -82,6 +82,11 @@ def load_message(path):
     except OSError:
         raise MailProbeError("Cannot read the message file. Check its path and access permissions.") from None
     LOG.info("Message loaded.")
+    return validate_message(raw)
+
+
+def validate_message(raw):
+    """Check structure without reconstructing headers or MIME parts."""
     if not raw.strip():
         raise MailProbeError("MIME structure: the message file is empty.")
     # SMTP expects CRLF. Reject other line endings instead of silently changing bytes.
@@ -103,9 +108,59 @@ def load_message(path):
                 raise MailProbeError(f"MIME structure: part {part_count} has no multipart children.")
     except (MessageError, ValueError, RecursionError):
         raise MailProbeError("MIME structure: the message could not be parsed.") from None
-    LOG.info("Basic MIME structural preflight passed; original bytes preserved.")
+    LOG.info("Basic MIME structural preflight passed.")
     LOG.debug("Checked %d MIME part(s), %d bytes. This is not exhaustive RFC validation.", part_count, len(raw))
     return raw
+
+
+def prepare_gui_message(raw, entered_to, from_override=None):
+    """Set GUI addresses in memory; keep unrelated headers and body bytes intact."""
+    if any(char in entered_to for char in "\r\n") or (
+            from_override is not None and any(char in from_override for char in "\r\n")):
+        raise MailProbeError("From and To must each occupy one line.")
+    recipients = envelope_recipients(entered_to)
+    headers, separator, body = raw.partition(b"\r\n\r\n")
+    if not separator:
+        raise MailProbeError("MIME structure: missing blank line between headers and body.")
+    if from_override is None:
+        parsed = BytesHeaderParser(policy=policy.default).parsebytes(headers + separator)
+        from_headers = parsed.get_all("From", [])
+        if len(from_headers) != 1:
+            raise MailProbeError("MIME must have exactly one From header, or enter a From override.")
+        origin = from_headers[0]
+        if origin.defects or len(origin.addresses) != 1:
+            raise MailProbeError("MIME From must contain one valid address, or enter a From override.")
+        sender = envelope_address(origin.addresses[0].addr_spec)
+    else:
+        sender = envelope_address(from_override.strip())
+
+    replacements = {b"to": b"To: " + ", ".join(recipients).encode("ascii")}
+    if from_override is not None:
+        replacements[b"from"] = b"From: " + sender.encode("ascii")
+    # Group continuations with their header so folded old values cannot survive.
+    blocks = []
+    for line in headers.split(b"\r\n"):
+        if line.startswith((b" ", b"\t")) and blocks:
+            blocks[-1] += b"\r\n" + line
+        else:
+            blocks.append(line)
+    outgoing = []
+    replaced = set()
+    for block in blocks:
+        name = block.split(b":", 1)[0].lower()
+        if name in replacements:
+            if name not in replaced:
+                outgoing.append(replacements[name])
+                replaced.add(name)
+        else:
+            outgoing.append(block)
+    for name, value in replacements.items():
+        if name not in replaced:
+            outgoing.append(value)
+    result = b"\r\n".join(outgoing) + separator + body
+    validate_message(result)
+    LOG.info("Outgoing From and To prepared; source file unchanged.")
+    return sender, recipients, result
 
 
 def send_raw(host, port, username, password, sender, recipients, raw):
