@@ -12,7 +12,7 @@ From the MailProbe folder, launch the desktop interface:
 python mailprobe_gui.py
 ```
 
-In the window, **From** uses the MIME header by default; uncheck **Use MIME** to override it. Enter **To** for every send and confirm the review. These addresses set the SMTP envelope and outgoing From/To headers; the source file stays unchanged.
+In the window, **From** uses the MIME header by default; uncheck **Use MIME** to override it. Enter **To**, then click **Send** to validate and send directly. Entered addresses stay for this app session only. These addresses set the SMTP envelope and outgoing From/To headers; the source file stays unchanged.
 
 Or use the CLI:
 

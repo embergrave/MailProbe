@@ -6,7 +6,7 @@ import queue
 import re
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+from tkinter import filedialog, scrolledtext, ttk
 
 import mailprobe as core
 
@@ -91,10 +91,10 @@ class MailProbeApp:
         recipient_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
         recipient_row.columnconfigure(1, weight=1)
         ttk.Label(recipient_row, text="To", width=18).grid(row=0, column=0, sticky="w")
-        self.recipients = tk.StringVar()  # Always blank, even if a config has recipient keys.
+        self.recipients = tk.StringVar()  # Blank on launch; retained only in this app session.
         self.recipient_entry = ttk.Entry(recipient_row, textvariable=self.recipients)
         self.recipient_entry.grid(row=0, column=1, sticky="ew")
-        ttk.Label(message, text="Use MIME reads From on review; uncheck to override. To is required (comma-separated).").grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(message, text="Use MIME reads From when sending; uncheck to override. To is required (comma-separated).").grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
         self.settings_open = False
         # Enlarge only the disclosure artwork, keeping the button's label font.
@@ -139,7 +139,7 @@ class MailProbeApp:
         log_frame.grid(row=6, column=0, sticky="nsew")
         self.log = scrolledtext.ScrolledText(log_frame, height=7, state="disabled", wrap="word", font=("Consolas", 9))
         self.log.pack(fill="both", expand=True)
-        self.status = tk.StringVar(value="Ready. To and final confirmation are required.")
+        self.status = tk.StringVar(value="Ready. Enter To, then Send.")
         ttk.Label(body, textvariable=self.status).grid(row=7, column=0, sticky="w", pady=(10, 0))
         self.progress = ttk.Progressbar(body, mode="indeterminate")
         self.progress.grid(row=8, column=0, sticky="ew", pady=(6, 0))
@@ -158,9 +158,9 @@ class MailProbeApp:
                         focuscolor="white", focusthickness=2)
         style.map("MailProbe.Primary.TButton", background=[("disabled", "#d1d5db"), ("pressed", "#163aa8"), ("active", "#2563eb")],
                   foreground=[("disabled", "#6b7280")], bordercolor=[("disabled", "#d1d5db"), ("focus", "#111827")])
-        self.review_button = ttk.Button(body, text="Review & Send", style="MailProbe.Primary.TButton",
-                                       width=24, command=self.review)
-        self.review_button.grid(row=9, column=0, pady=(18, 0))
+        self.send_button = ttk.Button(body, text="Send", style="MailProbe.Primary.TButton",
+                                     width=24, command=self.start_send)
+        self.send_button.grid(row=9, column=0, pady=(18, 0))
         self.update_region_state()
         if initial_error:
             core.LOG.error("%s Uncheck Use config to enter session settings.", initial_error)
@@ -220,7 +220,7 @@ class MailProbeApp:
         self.busy = busy
         for field in self.fields.values():
             field.set_busy(busy)
-        for widget in (self.recipient_entry, self.browse, self.review_button):
+        for widget in (self.recipient_entry, self.browse, self.send_button):
             widget.state(["disabled"] if busy else ["!disabled"])
         self.update_region_state()
         if busy:
@@ -230,7 +230,7 @@ class MailProbeApp:
             self.progress.stop()
             self.progress.grid_remove()
 
-    def review(self):
+    def start_send(self):
         if self.busy:
             return
         values = {key: field.value.get() for key, field in self.fields.items()}
@@ -251,26 +251,10 @@ class MailProbeApp:
                 raw, entered, None if use_mime_from else values["sender"])
             if use_mime_from:
                 self.events.put(("mime_from", sender))
-            self.events.put(("ready", (smtp, sender, recipients, path, raw)))
+            self.events.put(("sending", None))
+            self.send(smtp, sender, recipients, raw)
         except Exception as error:
             self.events.put(("failed", core.safe_error(error)))
-
-    def confirm(self, payload):
-        smtp, sender, recipients, path, raw = payload
-        review = (f"SMTP: {ascii(smtp[0])}:{smtp[1]} (verified STARTTLS required)\n"
-                  f"File: {ascii(str(path))}\nFrom: {sender}\n"
-                  f"To: {', '.join(recipients)}\n\n"
-                  "These addresses are used for the SMTP envelope and outgoing headers.\n"
-                  "The source file is unchanged.\n"
-                  "MIME checks are basic. SES may rewrite headers.\nSend this message once?")
-        if not messagebox.askyesno("Confirm send", review, parent=self.root, default=messagebox.NO):
-            core.LOG.info("Cancelled; no message sent.")
-            self.status.set("Cancelled; no message sent.")
-            self.set_busy(False)
-            return
-        self.status.set("Sending\u2026 wait for the SMTP result before trying again.")
-        self.recipients.set("")  # A later send must get fresh recipient input.
-        threading.Thread(target=self.send, args=(smtp, sender, recipients, raw), daemon=True).start()
 
     def send(self, smtp, sender, recipients, raw):
         try:
@@ -291,8 +275,8 @@ class MailProbeApp:
                 elif kind == "mime_from":
                     self.fields["sender"].configured = value
                     self.fields["sender"].value.set(value)
-                elif kind == "ready":
-                    self.confirm(value)
+                elif kind == "sending":
+                    self.status.set("Sending\u2026 wait for the SMTP result before trying again.")
                 elif kind == "failed":
                     core.LOG.error("%s No automatic retry.", value)
                     self.status.set(value)
